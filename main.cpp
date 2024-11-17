@@ -3,6 +3,7 @@
 #include <thread>
 #include <mutex>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <unistd.h>
 #include <sstream>
 #include "insert.h"
@@ -31,33 +32,36 @@ void handleClient(int clientSocket, JsonTable& jstab) {
         // Блокировка на время выполнения команды
         dbMutex.lock();
         if (firstMessage == "INSERT") {
+            cout << "Получена команда вставки." << endl;
             insert(command, jstab);
         } else if (firstMessage == "DELETE") {
+            cout << "Получена команда удаления." << endl;
             deleteRows(command, jstab);
         } else if (firstMessage == "SELECT") {
+            cout << "Получена команда выборки." << endl;
             select(command, jstab);
         } else if (firstMessage == "EXIT") {
             dbMutex.unlock();
-            break;  // Если команда EXIT, выходим из цикла
+            break;
         }
         dbMutex.unlock();
 
         send(clientSocket, "Комманда отправлена\n", 38, 0); // Отправляем подтверждение выполнения
     }
 
+    cout << "Клиент " << activeClients << " отключился."  << endl;
+
     // Закрытие сокета клиента
     close(clientSocket);
 
     // Уменьшаем количество активных клиентов после завершения работы с клиентом
-    {
-        lock_guard<mutex> lock(clientMutex);
-        activeClients--; // Уменьшаем количество активных клиентов
-    }
+    lock_guard<mutex> lock(clientMutex);
+    activeClients--;
 
     // Если больше нет активных клиентов, завершаем сервер
     if (activeClients == 0) {
         cout << "Все клиенты отключены. Завершение работы сервера.\n";
-        exit(0);  // Завершаем сервер
+        exit(0);
     }
 }
 
@@ -78,18 +82,25 @@ int main() {
     cout << "Сервер запущен и слушает порт 7432...\n";
 
     while (true) {
-        int clientSocket = accept(serverSocket, nullptr, nullptr);
-        
-        // Увеличиваем количество активных клиентов в главном потоке
-        {
-            lock_guard<mutex> lock(clientMutex);
-            activeClients++; // Увеличиваем количество активных клиентов
+        sockaddr_in clientAddr;
+        socklen_t clientLen = sizeof(clientAddr);
+        int clientSocket = accept(serverSocket, (struct sockaddr*)&clientAddr, &clientLen);
+
+        if (clientSocket < 0) {
+            cerr << "Ошибка подключения клиента\n";
+            continue;
         }
+
+        string clientIp = inet_ntoa(clientAddr.sin_addr);
+        cout << "Клиент " << (activeClients + 1) << " подключился: " << clientIp << endl;
+
+        // Увеличиваем количество активных клиентов в главном потоке
+        lock_guard<mutex> lock(clientMutex);
+        activeClients++;
 
         // Запуск потока для обработки запроса клиента
         thread clientThread(handleClient, clientSocket, ref(jstab));
         clientThread.detach(); // Поток для обработки запроса клиента
-
     }
 
     close(serverSocket); // Закрытие серверного сокета

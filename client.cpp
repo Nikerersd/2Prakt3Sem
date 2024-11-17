@@ -1,4 +1,3 @@
-// client.cpp
 #include <iostream>
 #include <string>
 #include <netinet/in.h>
